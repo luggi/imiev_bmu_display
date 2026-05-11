@@ -51,6 +51,7 @@
 #define LV_FONT_MONTSERRAT_14    1
 #define LV_FONT_MONTSERRAT_20    1
 #define LV_FONT_MONTSERRAT_28    1       /* CMU title + nav buttons */
+#define LV_FONT_MONTSERRAT_42    1       /* OBD2 hero numbers (SoC, kW) */
 #define LV_FONT_UNSCII_16        1       /* crisp 8x16 bitmap, no anti-aliasing */
 #define LV_FONT_DEFAULT          &lv_font_unscii_16
 

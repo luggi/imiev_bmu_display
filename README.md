@@ -6,10 +6,21 @@ Runs on the **Elecrow CrowPanel 5-inch v3.0** ESP32-S3 HMI (800×480 RGB,
 GT911 touch) with **LVGL 9.2**, **LovyanGFX 1.2**, and **Arduino-ESP32
 2.0.14** under PlatformIO.
 
-Shows one CMU at a time with all 8 cell voltages, 6 temperatures, and the
-balancing bitmask. Auto-follows whichever CMU is currently broadcasting,
-or tap the on-screen arrows for manual navigation (lock for 5 s, then
-resumes auto-follow).
+Two modes, picked at boot from a 5-second selection screen:
+
+- **CMU bus mode** — plugged into the BMU's internal bus
+  (IDs `0x611..0x6C4`). Shows one CMU at a time with all 8 cell
+  voltages, 6 temperatures, and the balancing bitmask.
+  Auto-follows whichever CMU is currently broadcasting, or tap the
+  on-screen arrows for manual navigation (locks the view for 5 s,
+  then resumes auto-follow).
+- **OBD2 mode** — plugged into the car's OBD2 / CAR-CAN bus
+  (IDs `0x373`, `0x374`, `0x6E1..0x6E4`). Pack-level dashboard with
+  SoC, pack V/A, instant power in kW, min/max cell voltage and delta,
+  and max module temperature.
+
+If you don't touch the selection screen for 5 s, CMU bus mode is selected
+automatically.
 
 ## What's in here
 
@@ -30,8 +41,9 @@ crowpanel5/
 |---|---|
 | Elecrow CrowPanel 5" **v3.0** | Older revisions use different touch wiring — see "v3.0 specifics" below |
 | 3.3 V CAN transceiver | SN65HVD230, MCP2562FD, ISO1042… **not** 5 V parts — they'll brown out the ESP RX pin |
-| 12 V bench supply or SLA | To wake the BMU. Plan for ~300 mA headroom (real draw not specified by Mitsubishi) |
-| 8-pin connector to BMU | Pin 1 CAN-L, pin 4 +12 V, pin 5 CAN-H, pin 6 GND |
+| 12 V bench supply or SLA | To wake the BMU when using CMU bus mode. Plan for ~300 mA headroom |
+| 8-pin connector to BMU | CMU bus mode only. Pin 1 CAN-L, pin 4 +12 V, pin 5 CAN-H, pin 6 GND |
+| OBD2 cable | OBD2 mode only. CAN-H on pin 6, CAN-L on pin 14 |
 
 Transceiver wiring to the ESP32-S3:
 
@@ -41,11 +53,15 @@ Transceiver wiring to the ESP32-S3:
 | CRX  (RX out of transceiver) | **GPIO 13** |
 | VCC | 3V3 from the CrowPanel |
 | GND | GND from the CrowPanel **and** from the i-MiEV bus, tied together |
-| CAN-H / CAN-L | BMU pins 5 / 1 |
+| CAN-H / CAN-L | BMU pins 5 / 1  **or**  OBD2 pins 6 / 14 |
 
-The i-MiEV bus is already terminated at both ends; **do not add a 120 Ω
-terminator** unless you're snooping outside the car with the BMU as the
-only other node.
+The same transceiver pins serve both modes — you just plug into whichever
+bus you want to listen to and pick the matching mode at startup. Both
+buses run at 500 kbps.
+
+Both the BMU bus and the OBD2 bus are already terminated at both ends;
+**do not add a 120 Ω terminator** unless you're snooping outside the
+car with the BMU as the only other node.
 
 ## First-time setup
 
@@ -62,12 +78,19 @@ only other node.
    ```
    CrowPanel 5 v3.0 / LVGL 9 / i-MiEV BMS viewer booting...
    I2C scan: 0x19 0x5D  (2 devices)
-   CAN: 500 kbps  TX=GPIO10  RX=GPIO13
    Ready.
    ```
    `0x19` is the PCA9557 I/O expander; `0x5D` is the GT911 after reset.
    If you only see `0x19`, touch latched the wrong I²C address — see the
    gotchas table.
+5. The display shows the **mode selection screen**: a green "CMU Bus"
+   button on the left, a navy "OBD2" button on the right, and a
+   countdown at the bottom. Tap one or wait 5 s (defaults to CMU bus).
+   After you commit, the serial monitor prints the chosen mode and:
+   ```
+   Mode: CMU bus  (BMU IDs 0x611-0x6C4)
+   CAN: 500 kbps  TX=GPIO10  RX=GPIO13
+   ```
 
 ### 3. Try it without a CAN bus — test mode
 At the top of [`src/main.cpp`](src/main.cpp):
@@ -77,13 +100,42 @@ At the top of [`src/main.cpp`](src/main.cpp):
 ```
 
 With `BMS_TEST_MODE = 1`, the firmware skips TWAI init and runs an
-internal task that feeds plausible-looking BMS frames through the real
-decoder. The title shows `CMU N  [TEST]` so it's obvious you're not
-looking at live data. Every cell color (healthy, near-top, out-of-range,
-balancing, no-data) is exercised; CMUs 11 and 12 are treated as 4-cell
-modules per spec so cells 5–8 stay grey.
+internal task that feeds plausible-looking frames through the real
+decoder. The test task waits for you to pick a mode at boot, then
+synthesizes the matching frame type:
+
+- **CMU mode test data:** cycles through all 12 CMUs every ~4 s,
+  baseline cells ~3.95 V with a few deliberately out-of-range cells so
+  every color is exercised, balancing toggles on CMUs 2 and 5 every 4 s.
+  CMUs 11 and 12 are treated as 4-cell modules per spec so cells 5–8
+  stay grey. The title shows `CMU N  [TEST]`.
+- **OBD2 mode test data:** pack voltage oscillates around 345 V,
+  current ±18 A, SoC drifting around 87.5 %, plus a full
+  `0x6E1..0x6E4` cell stream. The title shows `OBD2 Pack  [TEST]`.
 
 ## UI tour
+
+### Mode selection (boot screen)
+
+```
+┌──────────────────────────────────────────────────────┐
+│              i-MiEV BMS viewer                       │
+│              Select data source                      │
+│                                                      │
+│      ┌───────────────┐    ┌───────────────┐          │
+│      │   CMU Bus     │    │     OBD2      │          │
+│      │ per-CMU detail│    │ pack dashboard│          │
+│      │   (default)   │    │               │          │
+│      └───────────────┘    └───────────────┘          │
+│                                                      │
+│           CMU bus selected in 3 s...                 │
+└──────────────────────────────────────────────────────┘
+```
+
+Tap a button or wait for the timer. The choice is committed for the
+rest of the session — to switch modes, reboot.
+
+### CMU bus mode
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -106,7 +158,7 @@ modules per spec so cells 5–8 stay grey.
 └──────────────────────────────────────────────────────┘
 ```
 
-| Color | Meaning |
+| Cell color | Meaning |
 |---|---|
 | Dark green | Healthy cell (3.30 V – 4.05 V, not balancing) |
 | Navy | Balancing — bleed resistor active |
@@ -117,6 +169,38 @@ modules per spec so cells 5–8 stay grey.
 The badge top-right is **green AUTO** when auto-follow is engaged
 (latest CMU on screen) and **blue MANUAL** when you've tapped a nav
 button (locks the view for 5 s, then resumes auto).
+
+### OBD2 mode
+
+```
+┌──────────────────────────────────────────────────────┐
+│ OBD2 Pack                                     FRESH  │
+│                                                      │
+│                                                      │
+│      87.5 %               -4.25 kW                   │   <- montserrat_42
+│      State of Charge      Power (- discharge ...)    │
+│                                                      │
+│  Pack:       345.6 V       Cell max:   4.09 V        │   <- unscii_16
+│  Current:    -12.3 A       Cell min:   3.92 V        │
+│  Temp:       18..26 C      Delta:       170 mV       │
+│                                                      │
+│  last frame 87 ms ago (fresh)   pack frames: 12440   │
+└──────────────────────────────────────────────────────┘
+```
+
+| Element | Meaning / source |
+|---|---|
+| Top-right badge | **NO DATA** (grey) → **FRESH** (green, < 2 s old) → **STALE** (red, ≥ 2 s old) |
+| SoC hero | `0x374` — average of SoC1 and SoC2 |
+| Power hero color | Dark green when charging (kW > 0), navy when discharging (kW < 0), grey near zero |
+| Pack V / Current A | `0x373` bytes 4–5 and 2–3 |
+| Cell max / min | `0x373` bytes 0 and 1 (note: different encoding than per-cell `0x6E1..0x6E4`) |
+| Delta | computed `(cell_max − cell_min) × 1000` mV |
+| Temp | Per-sensor min..max scanned across `g_cmu[].temp_c[]` (sensors fed by `0x6E1..0x6E4`). Falls back to `Temp max: N C` from `0x374` byte 4 if no sensor stream has arrived yet |
+
+OBD2 mode has no navigation buttons — it's a single fixed dashboard.
+The per-CMU cell data from `0x6E1..0x6E4` is decoded into the same
+`g_cmu[]` store but not currently displayed in this view.
 
 ## Why these specific versions?
 
@@ -164,18 +248,54 @@ and 18, replace `crowpanel_v3_touch_bringup()` with a direct
 | Watchdog reset on boot | LVGL draw buffers couldn't allocate — PSRAM not enabled |
 | Upload fails, "wrong chip detected" | Hold BOOT, tap RESET, release BOOT, retry upload |
 | `twai_driver_install failed` | Pin conflict (10/13 already used) or transceiver not powered |
-| All cells show grey `--` despite CAN being up | Bus is alive but BMU asleep — needs `+12 V` on pin 4 to wake |
+| All cells show grey `--` despite CAN being up | Bus is alive but BMU asleep — needs `+12 V` on pin 4 to wake (CMU mode); ignition on or charge port active (OBD2 mode) |
 | Cells flicker between values and `--` | Transceiver power or ground bounce — recheck wiring |
+| Picked OBD2 but cells stay grey | Wrong bus for the chosen mode — CMU mode expects `0x611..0x6C4`, OBD2 mode expects `0x373/0x374/0x6E1..0x6E4`. Reboot and pick the other |
+| Selection screen jumps to CMU mode before I can tap | Touch isn't working — see the touch gotchas above; once touch is fixed the 5 s timer behaves correctly |
 
 ## Protocol reference
 
-The decoder in [`decode_frame()`](src/main.cpp) implements:
+The dispatcher in [`decode_frame()`](src/main.cpp) routes by ID range to
+one of four decoders.
+
+### CMU bus (`0x611..0x6C4`) — internal BMU↔CMU traffic
 
 - **CAN ID:** `0x600 + (CMU_id × 0x10) + pair_id`, where `CMU_id` is 1–12
   and `pair_id` is 1–4 (cell pairs).
 - **Voltage:** `(byte_H << 8 | byte_L) × 0.005 + 2.1` V
-- **Temperature:** `raw - 50` °C
+- **Temperature:** `raw − 50` °C
 - **Balance mask:** byte 1 of frame 1 — bit `i` = cell `i+1` actively
   bleeding.
 - **4-cell modules:** frames 3 & 4 carry zeros for the missing cells;
   the UI renders those rows as grey `--`.
+
+### OBD2 bus — pack-level (`0x373`, `0x374`)
+
+| ID | Bytes | Formula | Units |
+|---|---|---|---|
+| `0x373` | 0 | `(b0 + 210) / 100` | cell max V |
+| `0x373` | 1 | `(b1 + 210) / 100` | cell min V |
+| `0x373` | 2–3 | `((b2·256 + b3) − 32768) × −0.01` | pack current A |
+| `0x373` | 4–5 | `(b4·256 + b5) × 0.1` | pack voltage V |
+| `0x374` | 0 | `(b0 − 10) / 2` | SoC1 % |
+| `0x374` | 1 | `(b1 − 10) / 2` | SoC2 % |
+| `0x374` | 4 | `b4 − 50` | max temperature °C |
+
+Power is computed as `pack_v × pack_a / 1000` kW.
+
+### OBD2 bus — cell stream (`0x6E1..0x6E4`)
+
+Same per-cell encoding as the CMU bus (16-bit raw value, decoded as
+`raw × 0.005 + 2.1` V). Byte 0 of each frame is a 1-based CMU index
+(1–12). The 88 cells of the pack are split across the four messages:
+
+| ID | Cells in this CMU | Temps in this CMU |
+|---|---|---|
+| `0x6E1` | 1, 2 (bytes 4–7) | T1, T2 (bytes 2, 3) |
+| `0x6E2` | 3, 4 (bytes 4–7) | T3, T4 (bytes 1, 2) |
+| `0x6E3` | 5, 6 (bytes 4–7) — skipped for CMU 6 & 12 | T5, T6 (bytes 1, 2) |
+| `0x6E4` | 7, 8 (bytes 4–7) — skipped for CMU 6 & 12 | — |
+
+The decoder writes into the same `g_cmu[NUM_CMUS][CELLS_PER_CMU]`
+structure used by the CMU-bus path, so the OBD2 cell stream populates
+the same data model — just not currently shown in the OBD2 dashboard.
