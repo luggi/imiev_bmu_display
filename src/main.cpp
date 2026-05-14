@@ -179,7 +179,15 @@ static inline float cell_volts(uint16_t raw) {
  * Always decodes everything we know how to. Whether the user is on
  * the CMU bus or the OBD2 bus determines which subset of frames they
  * actually see — the rest of the decoders simply never fire.
+ *
+ * Validity guards: the BMU broadcasts 0xFFFF for cells that aren't
+ * present on 4-cell modules (raw 0xFFFF -> 329.775 V via the formula),
+ * and 0xFF for unwired temp sensors (raw 0xFF -> -51 C as int8). Both
+ * are equivalent to "no data" and must be filtered alongside 0x00.
  * ===================================================================== */
+static inline bool cell_raw_valid(uint16_t v) { return v != 0 && v != 0xFFFFu; }
+static inline bool temp_raw_valid(uint8_t  v) { return v != 0 && v != 0xFFu;   }
+
 static void decode_bmu_frame(const twai_message_t &msg) {
     // CMU bus: per-cell data (IDs 0x611..0x6C4, paragraph 2 of the spec)
     const uint32_t id = msg.identifier;
@@ -198,21 +206,25 @@ static void decode_bmu_frame(const twai_message_t &msg) {
     CmuState &c = g_cmu[cmu_idx];
     c.cell_raw[c1]   = v1;
     c.cell_raw[c2]   = v2;
-    c.cell_valid[c1] = (v1 != 0);
-    c.cell_valid[c2] = (v2 != 0);
+    c.cell_valid[c1] = cell_raw_valid(v1);
+    c.cell_valid[c2] = cell_raw_valid(v2);
     switch (pair) {
         case 0:
             c.balance_mask  = d[1];
-            c.temp_c[0]     = int8_t(int(d[2]) - 50);  c.temp_valid[0] = (d[2] != 0);
-            c.temp_c[1]     = int8_t(int(d[3]) - 50);  c.temp_valid[1] = (d[3] != 0);
+            c.temp_c[0]     = int8_t(int(d[2]) - 50);  c.temp_valid[0] = temp_raw_valid(d[2]);
+            c.temp_c[1]     = int8_t(int(d[3]) - 50);  c.temp_valid[1] = temp_raw_valid(d[3]);
             break;
         case 1:
-            c.temp_c[2]     = int8_t(int(d[2]) - 50);  c.temp_valid[2] = (d[2] != 0);
-            c.temp_c[3]     = int8_t(int(d[3]) - 50);  c.temp_valid[3] = (d[3] != 0);
+            // T3 at byte 1, T4 at byte 2 (verified against SimpBMS ImievBMSV2 and
+            // c-zero_dashboard sources). The original spec showed T3 at byte 2 / T4
+            // at byte 3, but that doesn't match real hardware — the layout is the
+            // same as frame 3 (sensor pair starts at byte 1).
+            c.temp_c[2]     = int8_t(int(d[1]) - 50);  c.temp_valid[2] = temp_raw_valid(d[1]);
+            c.temp_c[3]     = int8_t(int(d[2]) - 50);  c.temp_valid[3] = temp_raw_valid(d[2]);
             break;
         case 2:
-            c.temp_c[4]     = int8_t(int(d[1]) - 50);  c.temp_valid[4] = (d[1] != 0);
-            c.temp_c[5]     = int8_t(int(d[2]) - 50);  c.temp_valid[5] = (d[2] != 0);
+            c.temp_c[4]     = int8_t(int(d[1]) - 50);  c.temp_valid[4] = temp_raw_valid(d[1]);
+            c.temp_c[5]     = int8_t(int(d[2]) - 50);  c.temp_valid[5] = temp_raw_valid(d[2]);
             break;
         case 3:
             break;
@@ -242,23 +254,23 @@ static void decode_obd2_cells_frame(const twai_message_t &msg) {
     portENTER_CRITICAL(&g_data_mux);
     CmuState &c = g_cmu[idx];
     if (id == 0x6E1) {
-        c.cell_raw[0] = va;  c.cell_valid[0] = (va != 0);
-        c.cell_raw[1] = vb;  c.cell_valid[1] = (vb != 0);
-        c.temp_c[0]     = int8_t(int(d[2]) - 50);  c.temp_valid[0] = (d[2] != 0);
-        c.temp_c[1]     = int8_t(int(d[3]) - 50);  c.temp_valid[1] = (d[3] != 0);
+        c.cell_raw[0] = va;  c.cell_valid[0] = cell_raw_valid(va);
+        c.cell_raw[1] = vb;  c.cell_valid[1] = cell_raw_valid(vb);
+        c.temp_c[0]     = int8_t(int(d[2]) - 50);  c.temp_valid[0] = temp_raw_valid(d[2]);
+        c.temp_c[1]     = int8_t(int(d[3]) - 50);  c.temp_valid[1] = temp_raw_valid(d[3]);
     } else if (id == 0x6E2) {
-        c.cell_raw[2] = va;  c.cell_valid[2] = (va != 0);
-        c.cell_raw[3] = vb;  c.cell_valid[3] = (vb != 0);
-        c.temp_c[2]     = int8_t(int(d[1]) - 50);  c.temp_valid[2] = (d[1] != 0);
-        c.temp_c[3]     = int8_t(int(d[2]) - 50);  c.temp_valid[3] = (d[2] != 0);
+        c.cell_raw[2] = va;  c.cell_valid[2] = cell_raw_valid(va);
+        c.cell_raw[3] = vb;  c.cell_valid[3] = cell_raw_valid(vb);
+        c.temp_c[2]     = int8_t(int(d[1]) - 50);  c.temp_valid[2] = temp_raw_valid(d[1]);
+        c.temp_c[3]     = int8_t(int(d[2]) - 50);  c.temp_valid[3] = temp_raw_valid(d[2]);
     } else if (id == 0x6E3 && !is_4cell) {
-        c.cell_raw[4] = va;  c.cell_valid[4] = (va != 0);
-        c.cell_raw[5] = vb;  c.cell_valid[5] = (vb != 0);
-        c.temp_c[4]     = int8_t(int(d[1]) - 50);  c.temp_valid[4] = (d[1] != 0);
-        c.temp_c[5]     = int8_t(int(d[2]) - 50);  c.temp_valid[5] = (d[2] != 0);
+        c.cell_raw[4] = va;  c.cell_valid[4] = cell_raw_valid(va);
+        c.cell_raw[5] = vb;  c.cell_valid[5] = cell_raw_valid(vb);
+        c.temp_c[4]     = int8_t(int(d[1]) - 50);  c.temp_valid[4] = temp_raw_valid(d[1]);
+        c.temp_c[5]     = int8_t(int(d[2]) - 50);  c.temp_valid[5] = temp_raw_valid(d[2]);
     } else if (id == 0x6E4 && !is_4cell) {
-        c.cell_raw[6] = va;  c.cell_valid[6] = (va != 0);
-        c.cell_raw[7] = vb;  c.cell_valid[7] = (vb != 0);
+        c.cell_raw[6] = va;  c.cell_valid[6] = cell_raw_valid(va);
+        c.cell_raw[7] = vb;  c.cell_valid[7] = cell_raw_valid(vb);
     }
     c.last_update_ms = millis();
     c.frames_seen++;
@@ -370,7 +382,9 @@ static void test_cmu_step(int &cmu, int &pair) {
         if (v < 0) v = 0;  if (v > 600) v = 600;
         return uint16_t(v);
     };
-    const bool pair_has_cells = !is_4cell(cmu) || pair < 2;
+    // 4-cell modules have cells 1..4 and temps T1..T3. 8-cell modules have all.
+    const bool is_8cell      = !is_4cell(cmu);
+    const bool pair_has_cells = is_8cell || pair < 2;
     const uint16_t v1 = pair_has_cells ? fake_cell_raw(cmu, pair * 2)     : 0;
     const uint16_t v2 = pair_has_cells ? fake_cell_raw(cmu, pair * 2 + 1) : 0;
     m.data[4] = uint8_t(v1 >> 8);  m.data[5] = uint8_t(v1 & 0xFF);
@@ -382,10 +396,24 @@ static void test_cmu_step(int &cmu, int &pair) {
         (cmu == 1 && balance_phase) ? 0b00010101 :
         (cmu == 4 && balance_phase) ? 0b10000010 : 0;
     switch (pair) {
-        case 0:  m.data[1] = bal; m.data[2] = fake_temp(1); m.data[3] = fake_temp(2); break;
-        case 1:  m.data[1] = 0;   m.data[2] = pair_has_cells ? fake_temp(3) : 0; m.data[3] = pair_has_cells ? fake_temp(4) : 0; break;
-        case 2:  m.data[1] = pair_has_cells ? fake_temp(5) : 0; m.data[2] = pair_has_cells ? fake_temp(6) : 0; m.data[3] = 0; break;
-        case 3:  m.data[1] = 0; m.data[2] = 0; m.data[3] = 0; break;
+        case 0:                                  // T1, T2 — present on all modules
+            m.data[1] = bal;
+            m.data[2] = fake_temp(1);
+            m.data[3] = fake_temp(2);
+            break;
+        case 1:                                  // T3 (byte 1, all modules), T4 (byte 2, 8-cell only)
+            m.data[1] = fake_temp(3);
+            m.data[2] = is_8cell ? fake_temp(4) : 0;
+            m.data[3] = 0;
+            break;
+        case 2:                                  // T5, T6 — 8-cell modules only
+            m.data[1] = is_8cell ? fake_temp(5) : 0;
+            m.data[2] = is_8cell ? fake_temp(6) : 0;
+            m.data[3] = 0;
+            break;
+        case 3:
+            m.data[1] = 0; m.data[2] = 0; m.data[3] = 0;
+            break;
     }
     decode_frame(m);
     pair = (pair + 1) & 0x03;

@@ -266,8 +266,23 @@ one of four decoders.
 - **Temperature:** `raw − 50` °C
 - **Balance mask:** byte 1 of frame 1 — bit `i` = cell `i+1` actively
   bleeding.
-- **4-cell modules:** frames 3 & 4 carry zeros for the missing cells;
-  the UI renders those rows as grey `--`.
+- **Per-frame byte layout** (verified against the SimpBMS `ImievBMSV2`
+  and `c-zero_dashboard` decoders; matches real hardware):
+
+  | Frame | Byte 1 | Byte 2 | Byte 3 |
+  |---|---|---|---|
+  | 1 (cells 1, 2) | balance mask | T1 | T2 |
+  | 2 (cells 3, 4) | **T3** | **T4** | unused |
+  | 3 (cells 5, 6) | T5 | T6 | unused |
+  | 4 (cells 7, 8) | unused | unused | unused |
+
+  Cell voltages always live in bytes 4–7 (two 16-bit big-endian values).
+
+- **4-cell modules (CMU 6 and CMU 12):** physically have **3** temp
+  sensors (T1, T2, T3) and only cells 1–4. Frames 3 & 4 carry no real
+  data — cells 5–8 are `0xFFFF`, missing-temp bytes are `0xFF` or
+  `0x00`. The decoder rejects all three "no-data" markers, so those
+  rows render as grey `--`.
 
 ### OBD2 bus — pack-level (`0x373`, `0x374`)
 
