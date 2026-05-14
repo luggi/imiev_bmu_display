@@ -286,6 +286,7 @@ Validated with imiev 2012 BMU 4 cell and 8 cell
   rows render as grey `--`.
 
 ### OBD2 bus — pack-level (`0x373`, `0x374`)
+not validated, might contain errors
 
 | ID | Bytes | Formula | Units |
 |---|---|---|---|
