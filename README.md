@@ -259,6 +259,7 @@ The dispatcher in [`decode_frame()`](src/main.cpp) routes by ID range to
 one of four decoders.
 
 ### CMU bus (`0x611..0x6C4`) — internal BMU↔CMU traffic
+Validated with imiev 2012 BMU 4 cell and 8 cell
 
 - **CAN ID:** `0x600 + (CMU_id × 0x10) + pair_id`, where `CMU_id` is 1–12
   and `pair_id` is 1–4 (cell pairs).
