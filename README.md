@@ -1,5 +1,14 @@
 # Mitsubishi i-MiEV BMS viewer — CrowPanel 5" v3.0 (PlatformIO)
 
+> ⚠️ **Work in progress.** This project is under active development and
+> has not yet been fully validated on a complete i-MiEV pack across both
+> bus modes. Pin assignments, byte layouts, decoding formulas, and on-
+> screen values **may contain errors**. Cross-check anything you act on
+> (especially before connecting to a live HV pack or relying on
+> readings for diagnostics) against the linked upstream sources
+> (SimpBMS / `ImievBMSV2`, `c-zero_dashboard`, the myimiev forum
+> threads cited below). Pull requests and corrections welcome.
+
 A standalone CAN listener + display for snooping the BMU/CMU broadcasts on
 a Mitsubishi i-MiEV (and clones: Peugeot iOn, Citroën C-Zero) battery pack.
 Runs on the **Elecrow CrowPanel 5-inch v3.0** ESP32-S3 HMI (800×480 RGB,
