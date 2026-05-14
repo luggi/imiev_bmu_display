@@ -40,10 +40,38 @@ crowpanel5/
 | Item | Notes |
 |---|---|
 | Elecrow CrowPanel 5" **v3.0** | Older revisions use different touch wiring — see "v3.0 specifics" below |
-| 3.3 V CAN transceiver | SN65HVD230, MCP2562FD, ISO1042… **not** 5 V parts — they'll brown out the ESP RX pin |
+| CAN transceiver | Either a native 3.3 V part (SN65HVD230, MCP2562FD, ISO1042) **or** a TJA1050 module with a **voltage divider on the RX line** — see note below |
 | 12 V bench supply or SLA | To wake the BMU when using CMU bus mode. Plan for ~300 mA headroom |
 | 8-pin connector to BMU | CMU bus mode only. Pin 1 CAN-L, pin 4 +12 V, pin 5 CAN-H, pin 6 GND |
 | OBD2 cable | OBD2 mode only. CAN-H on pin 6, CAN-L on pin 14 |
+
+### Note on TJA1050 modules
+
+The cheap NXP TJA1050 boards on AliExpress / eBay are **5 V parts**:
+they run from VCC = 5 V and their `RXD` line swings 0–5 V. The
+ESP32-S3 GPIOs are **not** 5 V-tolerant — wiring `RXD` straight to
+`GPIO 13` will eventually damage the input pin, even if it appears
+to "work" at first.
+
+The fix is a resistor divider on the `RXD` line that drops 5 V to
+~3.3 V before it reaches the ESP. Typical values:
+
+```
+  TJA1050 RXD ──┬─────  R1 (1.8 kΩ)  ─────┬──→ ESP32-S3 GPIO 13
+                │                          │
+                └─ open ─┐                R2 (3.3 kΩ)
+                                            │
+                                          GND
+```
+
+`R2 / (R1 + R2) ≈ 0.65`, so 5 V → ~3.25 V at the ESP pin. The TX
+side (`GPIO 10` → TJA1050 `TXD`) does **not** need a divider —
+the TJA1050's input threshold treats 3.3 V as a valid logic-high.
+Run TJA1050 VCC from 5 V (USB-VBUS on the CrowPanel works), keep
+grounds tied together with the BMU/OBD2 cable shield.
+
+See [documentation/Board-Modifications.jpg](documentation/Board-Modifications.jpg)
+for a photo of the modification on a TJA1050 breakout (here a simple series resistor was used with 1.5k, which works, but is not a good solution)).
 
 Transceiver wiring to the ESP32-S3:
 
@@ -62,6 +90,11 @@ buses run at 500 kbps.
 Both the BMU bus and the OBD2 bus are already terminated at both ends;
 **do not add a 120 Ω terminator** unless you're snooping outside the
 car with the BMU as the only other node.
+
+Pinout of the BMU's 8-pin connector (CMU bus mode):
+https://eu.mouser.com/ProductDetail/JST-Automotive/SCPT-A021GF-0.5?qs=XoGB3caz5%2FZLgel%252BRalypQ%3D%3D
+https://eu.mouser.com/ProductDetail/JST-Automotive/08CPT-B-2A?qs=XoGB3caz5%2Facp4rQg5u%2F9w%3D%3D
+![BMU 8-pin CMU connector pinout](documentation/CMU-Connector-pinout.jpg)
 
 ## First-time setup
 
