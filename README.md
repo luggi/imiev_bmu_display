@@ -79,7 +79,7 @@ the TJA1050's input threshold treats 3.3 V as a valid logic-high.
 Run TJA1050 VCC from 5 V (USB-VBUS on the CrowPanel works), keep
 grounds tied together with the BMU/OBD2 cable shield.
 
-See [documentation/Board-Modifications.jpg](documentation/Board-Modifications.jpg)
+See [images/Board-Modifications.jpg](images/Board-Modifications.jpg)
 for a photo of the modification on a TJA1050 breakout (here a simple series resistor was used with 1.5k, which works, but is not a good solution)).
 
 Transceiver wiring to the ESP32-S3:
@@ -103,7 +103,7 @@ car with the BMU as the only other node.
 Pinout of the BMU's 8-pin connector (CMU bus mode):
 https://eu.mouser.com/ProductDetail/JST-Automotive/SCPT-A021GF-0.5?qs=XoGB3caz5%2FZLgel%252BRalypQ%3D%3D
 https://eu.mouser.com/ProductDetail/JST-Automotive/08CPT-B-2A?qs=XoGB3caz5%2Facp4rQg5u%2F9w%3D%3D
-![BMU 8-pin CMU connector pinout](documentation/CMU-Connector-pinout.jpg)
+![BMU 8-pin CMU connector pinout](images/CMU-Connector-pinout.jpg)
 
 ## First-time setup
 
